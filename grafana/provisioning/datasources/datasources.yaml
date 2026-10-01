@@ -15,6 +15,8 @@ datasources:
     type: loki
     access: proxy
     url: http://loki:3100
+    jsonData:
+      manageAlerts: false
 
   - name: Tempo
     uid: tempo

@@ -1,0 +1,82 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: order-tracker-alerts
+    folder: Order Tracker
+    interval: 1m
+    rules:
+      - uid: order-tracker-5xx
+        title: Order Tracker 5xx responses
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        dashboardUid: order-tracker-observability
+        panelId: 3
+        annotations:
+          __dashboardUid__: order-tracker-observability
+          __panelId__: "3"
+          summary: "5xx responses on /api/orders/{order_id}"
+          description: "The endpoint /api/orders/{order_id} returned one or more 5xx responses in the last 5 minutes."
+          endpoint: "/api/orders/{order_id}"
+          time_window: "5 minutes"
+          dashboard_url: "http://127.0.0.1:3000/d/order-tracker-observability/order-tracker-observability?orgId=1&viewPanel=3"
+        labels:
+          service: order-tracker
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: 'sum(rate(http_server_request_count_total{exported_job="order-tracker",http_status_code=~"5.."}[5m])) or vector(0)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+              range: true
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: "$B > 0"
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math

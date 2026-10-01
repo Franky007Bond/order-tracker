@@ -36,6 +36,9 @@ the Collector forwards them to the corresponding backends.
 Grafana automatically provisions the `Order Tracker Observability` dashboard with
 request-rate, total-request, and HTTP-error panels. Override `GRAFANA_ADMIN_USER`,
 `GRAFANA_ADMIN_PASSWORD`, or the `*_PORT` variables when needed.
+The provisioned `Order Tracker 5xx responses` alert evaluates 5xx responses over
+five minutes, links to the HTTP error-rate panel, and stays OK when there are no
+matching responses.
 
 ## API
 
