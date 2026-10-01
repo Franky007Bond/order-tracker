@@ -5,13 +5,57 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from opentelemetry import _logs, metrics, trace
+from opentelemetry._logs import SeverityNumber
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import (
+    ConsoleLogRecordExporter,
+    SimpleLogRecordProcessor,
+)
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 from pydantic import BaseModel, Field
 
 
 DB_PATH = Path(os.getenv("ORDER_DB_PATH", "data/orders.db"))
 STATUSES = {"received", "preparing", "shipped", "delivered"}
+TELEMETRY_RESOURCE = Resource.create({"service.name": "order-tracker"})
+
+
+def configure_telemetry():
+    tracer_provider = TracerProvider(resource=TELEMETRY_RESOURCE)
+    tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    trace.set_tracer_provider(tracer_provider)
+
+    metric_reader = PeriodicExportingMetricReader(
+        ConsoleMetricExporter(),
+        export_interval_millis=5000,
+    )
+    metrics.set_meter_provider(
+        MeterProvider(resource=TELEMETRY_RESOURCE, metric_readers=[metric_reader])
+    )
+
+    logger_provider = LoggerProvider(resource=TELEMETRY_RESOURCE)
+    logger_provider.add_log_record_processor(
+        SimpleLogRecordProcessor(ConsoleLogRecordExporter())
+    )
+    _logs.set_logger_provider(logger_provider)
+    return _logs.get_logger("order_tracker.orders")
+
+
+order_logger = configure_telemetry()
+tracer = trace.get_tracer(__name__)
+meter = metrics.get_meter(__name__)
+request_counter = meter.create_counter(
+    "http.server.request.count",
+    unit="{request}",
+    description="Number of HTTP requests",
+)
 
 
 def connect():
@@ -79,6 +123,22 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Order Tracker", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def record_request_metrics(request: Request, call_next):
+    response = await call_next(request)
+    route = request.scope.get("route")
+    route_name = getattr(route, "path", request.url.path)
+    request_counter.add(
+        1,
+        {
+            "http.method": request.method,
+            "http.route": route_name,
+            "http.status_code": response.status_code,
+        },
+    )
+    return response
+
+
 @app.get("/")
 def index():
     return FileResponse(Path(__file__).parent.parent / "static" / "index.html")
@@ -100,11 +160,31 @@ def list_orders():
 
 @app.get("/api/orders/{order_id}")
 def get_order(order_id: str):
-    with connect() as db:
-        row = db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404, "Order not found")
-    return order_detail(row)
+    with tracer.start_as_current_span(
+        "order.lookup",
+        attributes={"order.id": order_id},
+    ) as span:
+        with connect() as db:
+            row = db.execute(
+                "SELECT * FROM orders WHERE id = ?", (order_id,)
+            ).fetchone()
+        if row is None:
+            span.set_attribute("order.found", False)
+            order_logger.emit(
+                severity_number=SeverityNumber.WARN,
+                severity_text="WARN",
+                body=f"Order lookup failed: {order_id}",
+                attributes={"order.id": order_id, "order.found": False},
+            )
+            raise HTTPException(404, "Order not found")
+        span.set_attribute("order.found", True)
+        order_logger.emit(
+            severity_number=SeverityNumber.INFO,
+            severity_text="INFO",
+            body=f"Order lookup succeeded: {order_id}",
+            attributes={"order.id": order_id, "order.found": True},
+        )
+        return order_detail(row)
 
 
 @app.post("/api/orders", status_code=201)

@@ -33,3 +33,23 @@ def test_create_and_update_order(client):
 
 def test_missing_order(client):
     assert client.get("/api/orders/missing").status_code == 404
+
+
+def test_request_metric_includes_route_and_status(client, monkeypatch):
+    measurements = []
+    monkeypatch.setattr(
+        main.request_counter,
+        "add",
+        lambda amount, attributes: measurements.append((amount, attributes)),
+    )
+
+    assert client.get("/api/orders/missing").status_code == 404
+
+    assert measurements[-1] == (
+        1,
+        {
+            "http.method": "GET",
+            "http.route": "/api/orders/{order_id}",
+            "http.status_code": 404,
+        },
+    )
