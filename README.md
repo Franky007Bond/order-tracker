@@ -40,6 +40,13 @@ The provisioned `Order Tracker 5xx responses` alert evaluates 5xx responses over
 five minutes, links to the HTTP error-rate panel, and stays OK when there are no
 matching responses.
 
+Grafana sends alert webhooks to the incident-response service at
+<http://127.0.0.1:8001/alerts>. Each firing alert is saved under the persistent
+`incident_data` volume with its alert payload, recent Loki logs, recent Tempo
+traces, and assistant launch status. The service starts `codex exec` in read-only
+headless mode by default; set `CODING_ASSISTANT_COMMAND` when the assistant is
+installed or exposed differently in your environment.
+
 ## API
 
 | Method | Path | Purpose |

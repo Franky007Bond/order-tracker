@@ -21,6 +21,33 @@ services:
       timeout: 3s
       retries: 12
 
+  incident-response:
+    image: order-tracker-incident-response:${ORDER_TRACKER_TAG:-local}
+    build:
+      context: .
+      dockerfile: incident-response/Dockerfile
+    ports:
+      - "127.0.0.1:${INCIDENT_RESPONSE_PORT:-8001}:8001"
+    environment:
+      INCIDENT_DATA_DIR: /data/incidents
+      LOKI_URL: http://loki:3100
+      TEMPO_URL: http://tempo:3200
+      INCIDENT_SERVICE_NAME: order-tracker
+      ASSISTANT_WORKDIR: /workspace
+      CODING_ASSISTANT_COMMAND: ${CODING_ASSISTANT_COMMAND:-codex exec --sandbox read-only --skip-git-repo-check -}
+    volumes:
+      - incident_data:/data/incidents
+      - ./:/workspace:ro
+    depends_on:
+      - loki
+      - tempo
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   collector:
     image: otel/opentelemetry-collector-contrib:0.104.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
@@ -88,6 +115,7 @@ volumes:
   loki_data:
   tempo_data:
   grafana_data:
+  incident_data:
 
 networks:
   default:
